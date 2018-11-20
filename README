@@ -1,0 +1,10 @@
+This project is composed in openGL using assimp, Anton's Math and other libraries
+
+The scene should consist of a backdrop of the snow, with three snowmen (in a hierarchy) with a tree on each side.
+
+The keyboard and mouse are both initialized.
+
+The mouse rotates the snowman.
+The keyboard arrows change the camera position and pressing 'M' starts music. Key 'N' pauses the music while key 'B' resumes the music after it's been paused.
+
+Both font rendering, particle rendering and height map rendering were attempted for this project with no success. 
