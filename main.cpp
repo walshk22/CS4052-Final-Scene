@@ -83,8 +83,11 @@ GLuint VAO2;
 unsigned int texture1, texture2;
 
 //BACKGROUND
-GLuint BG_texture;
+unsigned int BG_texture, grassTexture;
 GLuint VBO_BG, VAO_BG, EBO_BG;
+GLuint FG_texture;
+GLuint transparentVAO, transparentVBO;
+vector<vec3> windows;
 
 
 //MUSIC
@@ -124,6 +127,7 @@ mat4 persp_proj;
 GLint shaderProgramID;
 GLint shaderProgram2;
 GLint backgroundShader;
+GLint windowShader;
 
 
 #pragma region MESH LOADING
@@ -367,6 +371,52 @@ GLuint CompileShaders3()
     return backgroundShader;
 }
 
+GLuint CompileShaders4()
+{
+    //Start the process of setting up our shaders by creating a program ID
+    //Note: we will link all the shaders together into this ID
+    windowShader = glCreateProgram();
+    if (windowShader== 0) {
+        std::cerr << "Error creating shader program..." << std::endl;
+        //std::cerr << "Press enter/return to exit..." << std::endl;
+        //std::cin.get();
+        exit(1);
+    }
+    
+    // Create two shader objects, one for the vertex, and one for the fragment shader
+    AddShader(windowShader, "Window_Shader/simpleVertexShader.txt", GL_VERTEX_SHADER);
+    AddShader(windowShader, "Window_Shader/simpleFragmentShader.txt", GL_FRAGMENT_SHADER);
+    
+    GLint Success = 0;
+    GLchar ErrorLog[1024] = { '0' };
+    // After compiling all shader objects and attaching them to the program, we can finally link it
+    glLinkProgram(windowShader);
+    // check for program related errors using glGetProgramiv
+    glGetProgramiv(windowShader, GL_LINK_STATUS, &Success);
+    if (Success == 0) {
+        glGetProgramInfoLog(windowShader, sizeof(ErrorLog), NULL, ErrorLog);
+        std::cerr << "Error linking shader program: " << ErrorLog << std::endl;
+        //std::cerr << "Press enter/return to exit..." << std::endl;
+        //std::cin.get();
+        exit(1);
+    }
+    
+    // program has been successfully linked but needs to be validated to check whether the program can execute given the current pipeline state
+    glValidateProgram(windowShader);
+    // check for program related errors using glGetProgramiv
+    glGetProgramiv(windowShader, GL_LINK_STATUS, &Success);
+    if (!Success) {
+        glGetProgramInfoLog(windowShader, sizeof(ErrorLog), NULL, ErrorLog);
+        std::cerr << "Invalid shader program: " << ErrorLog << std::endl;
+        //std::cerr << "Press enter/return to exit..." << std::endl;
+        //std::cin.get();
+        exit(1);
+    }
+    
+    
+    return windowShader;
+}
+
 #pragma endregion SHADER_FUNCTIONS
 
 #pragma region VBO_FUNCTIONS
@@ -494,12 +544,13 @@ void init()
     
     backgroundShader = CompileShaders3();
     
+    
     //GENERATING BACKGROUND
     float vertices[] = {
-        0.5f, 0.5f, 0.75f,      1.0f, 1.0f, 1.0f,           1.0f, 1.0f,     //Top Right
-        0.5f, -0.5f, 0.75f,     1.0f, 1.0f, 1.0f,           1.0f, 0.0f,     //Bottom Right
-        -0.5f, -0.5f, 0.75f,    1.0f, 1.0f, 1.0f,           0.0f, 0.0f,     //Bottom Left
-        -0.5f, 0.5f, 0.75f,     1.0f, 1.0f, 1.0f,           0.0f, 1.0f
+        0.5f, 0.5f, 0.9f,      1.0f, 1.0f, 1.0f,           1.0f, 1.0f,     //Top Right
+        0.5f, -0.5f, 0.9f,     1.0f, 1.0f, 1.0f,           1.0f, 0.0f,     //Bottom Right
+        -0.5f, -0.5f, 0.9f,    1.0f, 1.0f, 1.0f,           0.0f, 0.0f,     //Bottom Left
+        -0.5f, 0.5f, 0.9f,     1.0f, 1.0f, 1.0f,           0.0f, 1.0f
     };
     
     int indices[] = {
@@ -523,7 +574,7 @@ void init()
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 *sizeof(float), (void *) 0);
     glEnableVertexAttribArray(0);
     //Color
-    glVertexAttribPointer(1,3,GL_FLOAT, GL_FALSE, 8 *sizeof(float), (void *)(3 *sizeof(float)));
+    glVertexAttribPointer(1,3, GL_FLOAT, GL_FALSE, 8 *sizeof(float), (void *)(3 *sizeof(float)));
     glEnableVertexAttribArray(1);
     //Texture Coords
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 *sizeof(float), (void *) (6 *sizeof(float) ));
@@ -531,7 +582,7 @@ void init()
     
     glBindVertexArray(0);
     
-    //Load Texture
+    //Load Texture 1
     int BG_width, BG_height, nrChannels;
     glGenTextures(1, &BG_texture);
     glBindTexture(GL_TEXTURE_2D, BG_texture);
@@ -556,9 +607,76 @@ void init()
     
     glBindTexture(GL_TEXTURE_2D, 0);
     
-    
     //GENERATING OBJECTS
     generateObjectBufferMesh();
+    
+    windowShader = CompileShaders4();
+    
+    float transparentVertices[] = {
+        // positions         // texture Coords (swapped y coordinates because texture is flipped upside down)
+        0.0f,  0.5f,  0.0f,  0.0f,  0.0f,
+        0.0f, -0.5f,  0.0f,  0.0f,  1.0f,
+        1.0f, -0.5f,  0.0f,  1.0f,  1.0f,
+        
+        0.0f,  0.5f,  0.0f,  0.0f,  0.0f,
+        1.0f, -0.5f,  0.0f,  1.0f,  1.0f,
+        1.0f,  0.5f,  0.0f,  1.0f,  0.0f
+    };
+    //Transparent VAO and VBO
+    unsigned int transparentVAO, transparentVBO;
+    glGenVertexArrays(1, &transparentVAO);
+    glGenBuffers(1, &transparentVBO);
+    glBindVertexArray(transparentVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, transparentVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(transparentVertices), transparentVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glBindVertexArray(0);
+    
+    glGenTextures(1, &grassTexture);
+    
+    int grassWidth, grassHeight, grassNRComponents;
+    glGenTextures(1, &grassTexture);
+    glBindTexture(GL_TEXTURE_2D, grassTexture);
+    
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    
+    unsigned char *grassData = stbi_load("grass.png", &grassWidth, &grassHeight, &grassNRComponents, 0);
+    if (grassData)
+    {
+        GLenum format;
+        if (grassNRComponents == 1)
+            format = GL_RED;
+        else if (grassNRComponents == 3)
+            format = GL_RGB;
+        else if (grassNRComponents == 4)
+            format = GL_RGBA;
+        
+        glBindTexture(GL_TEXTURE_2D, grassTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, format, grassWidth, grassHeight, 0, format, GL_UNSIGNED_BYTE, grassData);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, format == GL_RGBA ? GL_CLAMP_TO_EDGE : GL_REPEAT); // for this tutorial: use GL_CLAMP_TO_EDGE to prevent semi-transparent borders. Due to interpolation it takes texels from next repeat
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, format == GL_RGBA ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        
+        stbi_image_free(grassData);
+    }
+    else
+    {
+        std::cout << " GRASS Texture failed to load : " << std::endl;
+        stbi_image_free(grassData);
+    }
+    
+    
+ 
+    
 }
 
 
@@ -592,6 +710,35 @@ void createBackground()
     
 }
 
+/*void createWindow()
+{
+   
+} */
+
+void createGrass()
+{
+    vector<vec3> vegetation
+    {
+        vec3(-1.5f, 0.0f, -0.48f),
+        vec3( 1.5f, 0.0f, 0.51f),
+        vec3( 0.0f, 0.0f, 0.7f),
+        vec3(-0.3f, 0.0f, -2.3f),
+        vec3 (0.5f, 0.0f, -0.6f)
+    };
+    
+    glUseProgram(windowShader );
+    glActiveTexture(GL_TEXTURE1);
+    glBindVertexArray(transparentVAO);
+    glBindTexture(GL_TEXTURE_2D, grassTexture);
+    glUniform1i(glGetUniformLocation(windowShader, "GrassTexture"), 0);
+
+    for(int i =0; i<vegetation.size(); i++)
+    {
+        mat4 model = identity_mat4();
+        model = translate(model,vec3(vegetation[i]));
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+}
 
 void display()
 {
@@ -607,7 +754,8 @@ void display()
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     
     //SCENE
-    createBackground();
+   // createBackground();
+    createGrass();
     
     glUseProgram(shaderProgramID);
     matrix_location = glGetUniformLocation(shaderProgramID, "model");
